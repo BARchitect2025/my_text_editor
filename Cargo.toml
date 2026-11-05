@@ -1,0 +1,11 @@
+[package]
+name = "my_text_editor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eframe = "0.37"
+
+egui_extras = "0.37"
+
+env_logger = "0.5"
