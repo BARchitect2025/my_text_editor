@@ -176,7 +176,6 @@ impl eframe::App for MyApp {
 }
 
 impl MyApp {
-    // 1. Notice the addition of `&mut self` as the first argument
     fn render_file_node(&mut self, ui: &mut egui::Ui, node: &FileNode) {
         match node {
             FileNode::File { name, path } => {
