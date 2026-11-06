@@ -13,7 +13,8 @@ enum FileNode {
     },
     Folder {
         name: String,
-        contents: Vec<FileNode>,
+        path: PathBuf,
+        contents: Option<Vec<FileNode>>,
     },
 }
 
@@ -26,10 +27,10 @@ fn visit_dirs(dir: &Path) -> Vec<FileNode> {
             let name = entry.file_name().to_string_lossy().to_string();
 
             if path.is_dir() {
-                let sub_contents = visit_dirs(&path);
                 contents.push(FileNode::Folder {
                     name,
-                    contents: sub_contents,
+                    path: path,
+                    contents: None,
                 });
             } else {
                 contents.push(FileNode::File { name, path });
@@ -46,7 +47,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "My Text Editor",
+        "TexE",
         options,
         Box::new(|cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
@@ -60,6 +61,7 @@ struct MyApp {
     contents: String,
     viewed_file: i32,
     files_open: [String; 32],
+    file_names_open: [String; 32],
     directory_open: String,
     save_to_file: String,
     directory_layout: Vec<FileNode>,
@@ -74,7 +76,8 @@ impl Default for MyApp {
         Self {
             contents: "".to_string(),
             viewed_file: 0,
-            files_open: array_placeholder,
+            files_open: Clone::clone(&array_placeholder),
+            file_names_open: Clone::clone(&array_placeholder),
             directory_open: ".".to_string(),
             save_to_file: "Untitled.txt".to_string(),
             directory_layout: layout,
@@ -85,10 +88,10 @@ impl Default for MyApp {
 impl eframe::App for MyApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // Directory file list
-        egui::Window::new(self.directory_open.to_string()).show(ui, |ui| {
+        egui::Panel::left(self.directory_open.to_string()).show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                for file_node in self.directory_layout.clone() {
-                    self.render_file_node(ui, &file_node);
+                for file_node in &mut self.directory_layout {
+                    MyApp::render_file_node(ui, file_node, &mut self.save_to_file, &mut self.contents);
                 }
             });
         });
@@ -116,10 +119,9 @@ impl eframe::App for MyApp {
                                     .clicked()
                             {
                                 self.viewed_file = i;
-                                self.save_to_file =
-                                    self.files_open[self.viewed_file as usize].to_string();
+                                self.save_to_file = self.files_open[self.viewed_file as usize].to_string();
 
-                                let path = Path::new(&self.files_open[self.viewed_file as usize]);
+                                let path = Path::new(&self.file_names_open[self.viewed_file as usize]);
                                 let display = path.display();
 
                                 let mut file = match fs::File::open(path) {
@@ -140,16 +142,27 @@ impl eframe::App for MyApp {
             // Save and where to save to
             egui::ScrollArea::vertical().id_salt(1).show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    if ui.add(egui::Button::new("Open Directory")).clicked() {
+                        self.directory_layout = visit_dirs(Path::new(&self.save_to_file));
+                    }
                     if ui.add(egui::Button::new("Save File")).clicked() {
                         if self.save_to_file != self.files_open[self.viewed_file as usize]
                             && self.viewed_file < 32
                         {
                             self.viewed_file += 1;
-                            self.files_open[self.viewed_file as usize] =
-                                self.save_to_file.to_string();
+
+                            let path_str = self.save_to_file.to_string();
+                            let path = Path::new(&path_str);
+
+                            if let Some(file_name) = path.file_name() {
+                                if let Some(name_str) = file_name.to_str() {
+                                    self.files_open[self.viewed_file as usize] = name_str.to_string();
+                                    self.file_names_open[self.viewed_file as usize] = path_str;
+                                }
+                            }
                         }
 
-                        let path = Path::new(&self.files_open[self.viewed_file as usize]);
+                        let path = Path::new(&self.file_names_open[self.viewed_file as usize]);
                         let display = path.display();
 
                         let mut file = match fs::File::create(path) {
@@ -176,15 +189,20 @@ impl eframe::App for MyApp {
 }
 
 impl MyApp {
-    fn render_file_node(&mut self, ui: &mut egui::Ui, node: &FileNode) {
+    fn render_file_node(
+        ui: &mut egui::Ui, 
+        node: &mut FileNode, 
+        save_to_file: &mut String, 
+        contents: &mut String
+    ) {
         match node {
             FileNode::File { name, path } => {
-                if ui.add(egui::Button::new(name)).clicked() {
-                    self.save_to_file = path.to_string_lossy().to_string();
+                if ui.add(egui::Button::new(name.to_string())).clicked() {
+                    *save_to_file = path.to_string_lossy().to_string();
 
-                    match fs::read_to_string(path) {
+                    match fs::read_to_string(&mut *path) {
                         Ok(text) => {
-                            self.contents = text;
+                            *contents = text;
                         }
                         Err(why) => {
                             eprintln!("Couldn't open {}: {}", path.display(), why);
@@ -192,12 +210,18 @@ impl MyApp {
                     }
                 }
             }
-            FileNode::Folder { name, contents, .. } => {
-                ui.collapsing(name, |ui| {
-                    for child in contents {
-                        self.render_file_node(ui, child);
+            FileNode::Folder { name, path, contents: folder_contents } => {
+                let collapsing_response = ui.collapsing(name.clone(), |ui| {
+                    if let Some(children) = folder_contents {
+                        for child in children {
+                            MyApp::render_file_node(ui, child, save_to_file, contents);
+                        }
                     }
                 });
+
+                if collapsing_response.fully_open() && folder_contents.is_none() {
+                    *folder_contents = Some(visit_dirs(path));
+                }
             }
         }
     }

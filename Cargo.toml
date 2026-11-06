@@ -9,3 +9,6 @@ eframe = "0.37"
 egui_extras = "0.37"
 
 env_logger = "0.5"
+
+[package.metadata.bundle]
+identifier = "com.barchitect.text_editor"
